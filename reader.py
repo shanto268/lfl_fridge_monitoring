@@ -194,3 +194,31 @@ class TritonLogReader:
               latest_data[col] = latest_row[col]
 
         return latest_data
+
+    def get_all_entries(self):
+        """Retrieves all entries from the Triton log file."""
+        df = self.get_df()
+        if df.empty:
+            return []
+
+        # Convert 'Time(secs)' to datetime objects, handling potential errors
+        try:
+            df['Time(secs)'] = pd.to_datetime(df['Time(secs)'], unit='s')
+        except ValueError as e:
+            print(f"Error converting 'Time(secs)' to datetime: {e}")
+            return []
+
+        all_entries = []
+        for _, row in df.iterrows():
+            entry = {'timestamp': row['Time(secs)']}
+            # Iterate through columns and extract relevant values
+            for col in df.columns:
+                if col.startswith("P"):  # Pressure
+                    entry[col] = row[col]
+                if "T(K)" in col:  # Temperature
+                    entry[col] = row[col]
+                if "R(Ohm)" in col:  # Resistance
+                    entry[col] = row[col]
+            all_entries.append(entry)
+
+        return all_entries

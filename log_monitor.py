@@ -9,6 +9,15 @@ from firebase_admin import credentials, db
 from reader import BlueForsLogReader, TritonLogReader  # Import both readers
 
 
+# --- Helper Function to Determine Fridge Type ---
+def get_fridge_type(pc_name: str) -> str:
+    if pc_name == "dopey":
+        return "Oxford"
+    else:
+        return "BlueFors"
+
+# --- Upload Functions ---
+
 def upload_data_bluefors(data, log_date):
     """Uploads data from BlueForsLogReader to Firestore, avoiding duplicates."""
     ref = db.reference(f'/{PC_NAME}/{log_date}')
@@ -17,81 +26,74 @@ def upload_data_bluefors(data, log_date):
         if log_type == 'flow_rate':
             timestamp_str = channels['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
             value = channels['value']
-            existing_entry = ref.child('flow_rate').order_by_child('timestamp').equal_to(timestamp_str).get()
-            if not existing_entry:
-                ref.child('flow_rate').push({
-                    'timestamp': timestamp_str,
-                    'value': float(value)
-                })
+            # Use timestamp as part of the key, and .set()
+            ref.child('flow_rate').child(timestamp_str.replace(":", "_")).set({
+                'timestamp': timestamp_str,
+                'value': float(value)
+            })
         else:
             for channel, channel_data in channels.items():
                 timestamp_str = channel_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
                 value = channel_data['value']
-                existing_entry = ref.child(log_type).child(channel).order_by_child('timestamp').equal_to(timestamp_str).get()
-                if not existing_entry:
-                    ref.child(log_type).child(channel).push({
-                        'timestamp': timestamp_str,
-                        'value': float(value)
-                    })
+                # Use timestamp as part of the key, and .set()
+                ref.child(log_type).child(channel).child(timestamp_str.replace(":", "_")).set({
+                    'timestamp': timestamp_str,
+                    'value': float(value),
+                    'channel': channel  # Include channel here
+                })
 
 def upload_data_triton(data, log_file_name):
     """Uploads data from TritonLogReader to Firestore, avoiding duplicates, and filtering zeros."""
     log_date = log_file_name.replace(" ", "_").replace(".", "_").split('_')[1]
-    log_date = f"{log_date[:2]}-{log_date[2:4]}-{log_date[4:6]}" 
+    log_date = f"{log_date[:2]}-{log_date[2:4]}-{log_date[4:6]}"
     ref = db.reference(f'/{PC_NAME}/{log_date}')
     timestamp_str = data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
-
-    # Check for duplicates using timestamp
-    existing_entry = ref.order_by_child('timestamp').equal_to(timestamp_str).get()
-    if existing_entry:
-        print(f"Duplicate entry found for timestamp {timestamp_str}, skipping.")
-        return
 
     data_to_upload = {'timestamp': timestamp_str}
 
     for key, value in data.items():
         if key != 'timestamp':
             if isinstance(value, (int, float, str, bool)):
-                # Filter out zero values (and non-numeric values)
                 if isinstance(value, (int, float)) and value == 0:
-                    continue  # Skip zero values
+                    continue
                 data_to_upload[key] = value
             elif isinstance(value, np.number):
-                #Filter out zero values
                 if float(value) == 0:
                     continue
                 data_to_upload[key] = float(value)
             else:
                 try:
-                    str_value = str(value)
-                    data_to_upload[key] = str_value # Convert all the others to string
+                    data_to_upload[key] = str(value)
                 except:
                     print(f"Could not convert value for {key} to string. Skipping.")
-    # If, after filtering zeros, there's nothing left to upload (other than
-    # the timestamp), don't upload anything.
-    if len(data_to_upload) > 1:  # More than just 'timestamp'
-        ref.push(data_to_upload)
+
+    if len(data_to_upload) > 1:
+        # Use timestamp as part of the key, and .set()
+        ref.child(timestamp_str.replace(":", "_")).set(data_to_upload)
     else:
         print("No non-zero data to upload (besides timestamp).")
 
-def main(LOGS_FOLDER = "logs"):
+def main(LOGS_FOLDER="logs"):
     """Main loop to continuously monitor logs and upload data."""
     processed_dates = set()
 
     while True:
+        # Determine fridge type *here*, based on PC_NAME, not a global.
+        fridge_type = get_fridge_type(PC_NAME)
+
         # Get the most recent log directory for BlueFors, or file for Triton
-        if FRIDGE_TYPE == "Oxford":
+        if fridge_type == "Oxford":
             log_files = [f for f in os.listdir(LOGS_FOLDER) if f.endswith('.vcl')]
-            log_files.sort(reverse=True)  # Sort files in descending order
+            log_files.sort(reverse=True)
             if not log_files:
                 print("No .vcl log files found.")
                 time.sleep(60)
                 continue
             latest_log_file = log_files[0]
-            latest_log_date = latest_log_file  # Use the filename as is for Triton
+            latest_log_date = latest_log_file
             log_file_path = os.path.join(LOGS_FOLDER, latest_log_file)
 
-        else: # Assume BlueFors
+        else:  # Assume BlueFors
             log_dates = [d for d in os.listdir(LOGS_FOLDER) if os.path.isdir(os.path.join(LOGS_FOLDER, d))]
             log_dates.sort(reverse=True)
             if not log_dates:
@@ -103,18 +105,19 @@ def main(LOGS_FOLDER = "logs"):
         if latest_log_date not in processed_dates:
             print(f"Processing new log date/file: {latest_log_date}")
             try:
-                if FRIDGE_TYPE == "Oxford":
+                if fridge_type == "Oxford":
                     log_reader = TritonLogReader(log_file_path)
                     latest_data = log_reader.get_latest_entry()
                     if latest_data:
-                         upload_data_triton(latest_data, latest_log_date) # Use specific upload
-                    else: print("no data latest found")
+                        upload_data_triton(latest_data, latest_log_date)
+                    else:
+                        print("no data latest found")
 
                 else:  # BlueFors
                     log_reader = BlueForsLogReader(LOGS_FOLDER)
                     latest_data = log_reader.get_latest_entry(latest_log_date)
                     if latest_data:
-                        upload_data_bluefors(latest_data, latest_log_date)  # Use specific upload function
+                        upload_data_bluefors(latest_data, latest_log_date)
                     else:
                         print(f"No data found for {latest_log_date}")
                 processed_dates.add(latest_log_date)
@@ -125,15 +128,14 @@ def main(LOGS_FOLDER = "logs"):
         else:
             print(f"Already processed {latest_log_date}, checking for updates...")
             try:
-                if FRIDGE_TYPE == "Oxford":
-                    # For Triton, we need to create the reader again to check for updates
-                    log_reader = TritonLogReader(log_file_path)  # Recreate to get new fpos
+                if fridge_type == "Oxford":
+                    log_reader = TritonLogReader(log_file_path)
                     latest_data = log_reader.get_latest_entry()
                     if latest_data:
                         upload_data_triton(latest_data, latest_log_date)
 
-                else: # BlueFors
-                    log_reader = BlueForsLogReader(LOGS_FOLDER) # Recreate to check the folder.
+                else:  # BlueFors
+                    log_reader = BlueForsLogReader(LOGS_FOLDER)
                     latest_data = log_reader.get_latest_entry(latest_log_date)
                     if latest_data:
                         upload_data_bluefors(latest_data, latest_log_date)
