@@ -234,10 +234,10 @@ def main():
     # upload_all_data(LOGS_PARENT_DIRECTORY)
 
     # 2. Upload data for a single day (BlueFors):
-    upload_single_day_data(LOGS_PARENT_DIRECTORY, "22-07-21")
+    #upload_single_day_data(LOGS_PARENT_DIRECTORY, "22-07-21")
 
     # 3. Upload data for a single day (Oxford):
-    #upload_single_day_data(LOGS_PARENT_DIRECTORY, "log 240119 141920.vcl") #Pass filename for Oxford
+    upload_single_day_data(LOGS_PARENT_DIRECTORY, "log 230607 124809.vcl") #Pass filename for Oxford
     print("Data upload complete.")
 
 if __name__ == "__main__":
