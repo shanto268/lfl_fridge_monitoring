@@ -1,6 +1,10 @@
 import os
+import sys
 
+import numpy as np
 import pandas as pd
+
+from parsers import parse
 
 
 # BlueFors Log Reader
@@ -114,3 +118,79 @@ class BlueForsLogReader:
                 }
 
             return latest_data
+
+class TritonLogReader:
+    def __init__(self, file_name):
+        self.file_path = file_name
+        self.name = self.get_formatted_name()
+        self.titles, self.data = self.get_data()
+
+    def get_formatted_name(self):
+        name = os.path.split(self.file_path)[1].replace("vcl","csv")
+        fpath = os.path.split(self.file_path)[0]
+        if sys.platform == "win32":
+            try:
+                save_path = fpath+r"\\data_csv\\"
+                try:
+                    os.makedirs(save_path)
+                except:
+                    pass
+                name = save_path + name
+            except:
+                raise SystemError()
+        else:
+            save_path = fpath+r"/data_csv/"
+            try:
+                os.makedirs(save_path)
+            except:
+                pass
+            name = save_path + name
+
+        return name
+
+    def get_data(self):
+        if not self.file_path:
+            raise ValueError()
+        try:
+            titles, data = parse(self.file_path)
+        except (IOError, RuntimeError) as ex:
+            print(' '.join(repr(a) for a in ex.args))
+        return titles, data
+
+    def get_df(self) -> bool:
+        df = pd.DataFrame(self.data.T)
+        df.columns = self.titles
+        return df
+
+    def to_csv(self) -> bool:
+        df = self.get_df()
+        df.to_csv(self.name, index=False)
+        print("{} has been generated!".format(self.name))
+
+    def get_latest_entry(self):
+        """Retrieves the latest entry from the Triton log file."""
+        df = self.get_df()
+        if df.empty:
+            return {}
+
+        # Convert 'Time(secs)' to datetime objects, handling potential errors
+        try:
+            df['Time(secs)'] = pd.to_datetime(df['Time(secs)'], unit='s')
+        except ValueError as e:
+            print(f"Error converting 'Time(secs)' to datetime: {e}")
+            return {}
+
+        # Find the row with the maximum timestamp
+        latest_row = df.loc[df['Time(secs)'].idxmax()]
+        latest_data = {'timestamp': latest_row['Time(secs)']}
+
+        # Iterate through columns and extract relevant values
+        for col in df.columns:
+            if col.startswith("P"):  # Pressure
+              latest_data[col] = latest_row[col]
+            if "T(K)" in col: # Temperature
+              latest_data[col] = latest_row[col]
+            if "R(Ohm)" in col: # Resistance
+              latest_data[col] = latest_row[col]
+
+        return latest_data

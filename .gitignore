@@ -3,3 +3,7 @@ __pycache__
 logs
 *.json
 test.*
+log_archives
+test_logs
+to_do.md
+.DS_Store
