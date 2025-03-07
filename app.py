@@ -108,6 +108,9 @@ def main():
     st.set_page_config(page_title="Fridge Monitor", layout="wide")
     st.title("LFL Fridge Monitoring System")
 
+    # Sidebar - Logo with link
+    st.sidebar.image("lfl_logo.png", use_container_width=True)
+
     # Sidebar for selecting fridge and data type
     selected_fridge = st.sidebar.selectbox("Select Fridge", PC_NAMES)
     fridge_type = get_fridge_type(selected_fridge)
