@@ -1,117 +1,103 @@
 import os
 import time
-from datetime import datetime, timedelta
 
+import firebase_admin
 import pandas as pd
-import psycopg2
-from dotenv import load_dotenv
-from psycopg2 import sql
+from dotenv import load_dotenv  # Add this import
+from firebase_admin import credentials, db
 
-from config import DB_CONFIG
-from reader import BlueForsLogReader
+from reader import \
+    BlueForsLogReader  # Assuming your original code is in logger_reader.py
 
+load_dotenv()
 
-# Connect to the database
-def connect_to_db():
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        print("Database connection successful")
-        return conn
-    except Exception as e:
-        print(f"Error connecting to database: {e}")
-        return None
+# --- Firebase Setup ---
+cred = credentials.Certificate(os.getenv('CRED_FILE'))  # Make sure this path is correct
+firebase_admin.initialize_app(cred, {
+    'databaseURL': os.getenv('DB_URL')  # Read the database URL from the .env file
+})
 
+PC_NAME = os.getenv("PC_NAME")
+ref = db.reference(f'/{PC_NAME}/')
 
-# Ensure table exists dynamically
-def ensure_table_exists(conn, table_name, columns):
-    try:
-        cursor = conn.cursor()
-        column_definitions = ", ".join([f"{col} FLOAT" if col != "timestamp" else "timestamp TIMESTAMP NOT NULL" for col in columns])
-        cursor.execute(
-            sql.SQL("""
-                CREATE TABLE IF NOT EXISTS {} (
-                    id SERIAL PRIMARY KEY,
-                    {}
-                );
-            """).format(sql.Identifier(table_name), sql.SQL(column_definitions))
-        )
-        conn.commit()
-        print(f"Ensured table {table_name} exists")
-    except Exception as e:
-        print(f"Error ensuring table {table_name} exists: {e}")
-        conn.rollback()
+# --- Log File Handling ---
+LOGS_FOLDER = "logs"  # Or the path to your logs folder
 
+def upload_data(data, log_date):
+    """Uploads the latest data to Firestore, avoiding duplicates."""
+    ref = db.reference(f'/{PC_NAME}/{log_date}') # Moved inside the function
 
-# Insert data into the database
-def insert_data_to_db(conn, table_name, data):
-    try:
-        cursor = conn.cursor()
-        for _, row in data.iterrows():
-            cols = list(row.index)
-            query = sql.SQL("""
-                INSERT INTO {} ({})
-                VALUES ({})
-                ON CONFLICT DO NOTHING;
-            """).format(
-                sql.Identifier(table_name),
-                sql.SQL(", ").join(map(sql.Identifier, cols)),
-                sql.SQL(", ").join(sql.Placeholder() for _ in cols)
-            )
-            cursor.execute(query, tuple(row))
-        conn.commit()
-        print(f"Inserted {len(data)} rows into {table_name}")
-    except Exception as e:
-        print(f"Error inserting data into {table_name}: {e}")
-        conn.rollback()
+    for log_type, channels in data.items():
+        if log_type == 'flow_rate':
+            # Handle flow rate separately
+            timestamp_str = channels['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+            value = channels['value']
 
+            # Check for existing flow_rate entry with the same timestamp
+            existing_entry = ref.child('flow_rate').order_by_child('timestamp').equal_to(timestamp_str).get()
+            if not existing_entry:
+                ref.child('flow_rate').push({
+                    'timestamp': timestamp_str,
+                    'value': float(value)  # Ensure value is a float
+                })
+        else: # handle channels
+            for channel, channel_data in channels.items():
+                timestamp_str = channel_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+                value = channel_data['value']
 
-# Monitor and update logs
-def monitor_logs(log_reader, conn, log_types, folder_path, sleep_time=60):
-    current_date = datetime.now().strftime('%y-%m-%d')
+                # Check for duplicate entry.
+                existing_entry = ref.child(log_type).child(channel).order_by_child('timestamp').equal_to(timestamp_str).get()
+                if not existing_entry:
+                    # Push to a child node with the channel name as the key
+                    ref.child(log_type).child(channel).push({
+                        'timestamp': timestamp_str,
+                        'value': float(value)
+                    })
+
+def main():
+    """Main loop to continuously monitor logs and upload data."""
+    log_reader = BlueForsLogReader(LOGS_FOLDER)
+    processed_dates = set()
 
     while True:
-        new_date = datetime.now().strftime('%y-%m-%d')
+        # Get the most recent log directory
+        log_dates = [d for d in os.listdir(LOGS_FOLDER) if os.path.isdir(os.path.join(LOGS_FOLDER, d))]
+        log_dates.sort(reverse=True)  # Sort in descending order to get the latest first
 
-        # Check for date change and reset if needed
-        if new_date != current_date:
-            current_date = new_date
+        if not log_dates:
+            print("No log directories found.")
+            time.sleep(60)
+            continue
 
-        # Process logs for the current day
-        for log_type, table_name in log_types.items():
-            data = log_reader.get_logs(current_date, log_type)
-            if not data.empty:
-                # Ensure table exists
-                ensure_table_exists(conn, table_name, data.columns)
-                # Insert data into the database
-                insert_data_to_db(conn, table_name, data)
+        latest_log_date = log_dates[0]
 
-        time.sleep(sleep_time)
+        if latest_log_date not in processed_dates:
+            print(f"Processing new log date: {latest_log_date}")
+            try:
+                latest_data = log_reader.get_latest_entry(latest_log_date)
+                if latest_data:
+                    upload_data(latest_data, latest_log_date) # Pass log_date
+                    processed_dates.add(latest_log_date) # add to the set
+                else:
+                    print(f"No data found for {latest_log_date}")
 
+            except Exception as e:
+                print(f"Error processing {latest_log_date}: {e}")
 
-# Main function
-def main():
-    conn = connect_to_db()
-    if conn is None:
-        return
+        else:
+            print(f"Already processed {latest_log_date}, checking for updates...")
+            # Even if the date is processed, there might be updates within the same log files.
+            try:
+                latest_data = log_reader.get_latest_entry(latest_log_date)  # Re-read data.  Crucial for live updates.
+                if latest_data:
+                    upload_data(latest_data, latest_log_date) # Pass log_date, and check for duplicates within.
+                else:
+                    print(f"No new data in {latest_log_date}") # No new data found
 
-    log_reader = BlueForsLogReader(folder_path="./logs")
+            except Exception as e:
+                print(f"Error processing {latest_log_date} during update check: {e}")
 
-    # Define log types and corresponding tables
-    log_types = {
-        "temperature": "temperature",
-        "pressure": "pressure",
-        "resistance": "resistance",
-        "status": "status",
-        "flowmeter": "flowmeter"
-    }
-
-    try:
-        monitor_logs(log_reader, conn, log_types, folder_path="./logs", sleep_time=30)
-    except KeyboardInterrupt:
-        print("\nShutting down gracefully...")
-    finally:
-        conn.close()
-        print("Database connection closed")
+        time.sleep(60)
 
 
 if __name__ == "__main__":

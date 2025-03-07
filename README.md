@@ -1,152 +1,133 @@
 # BlueFors Data Logger and Monitor
 
-This project provides tools for logging and monitoring BlueFors dilution refrigerator data, processing logs into a PostgreSQL database for further analysis.
+This project monitors a BlueFors dilution refrigerator, logging data to a Firebase Realtime Database.
 
 ## Features
 
-- **Log to Database**: Process historical logs and insert them into the database.
-- **Real-Time Monitoring**: Continuously monitor logs of the current day and update the database every minute.
+- **Real-Time Monitoring:** Continuously updates Firebase with the latest log data.
 
----
+## Setup
 
-## Setup Instructions
+### 1. Prerequisites
 
-### 1. Install Dependencies
+- Python 3.11+
+- A Google Cloud Platform (GCP) project with Firebase enabled.
+- A Firebase Realtime Database instance.
 
-Ensure you have Python and PostgreSQL installed. Set up a Python environment:
+### 2. Google Cloud & Firebase Setup
 
-```bash
-conda create -n fridge_env python=3.9 -y
-conda activate fridge_env
-pip install -r requirements.txt
-```
+1.  **Create a GCP Project:** If you don't have one, create a project in the [Google Cloud Console](https://console.cloud.google.com/).
+2.  **Enable Firebase:** In your GCP project, navigate to Firebase and enable it.
+3.  **Create a Realtime Database:** Within Firebase, create a Realtime Database instance. Note the database URL (e.g., `https://<your-project-id>.firebaseio.com/`).
+4.  **Create a Service Account:**
+    - Go to "Project settings" (gear icon) in the Firebase console.
+    - Select the "Service accounts" tab.
+    - Click "Generate new private key". This downloads a JSON file (e.g., `sneezy.json`). **Keep this file secure!** Place it in the project's root directory.
+5.  **Set Firebase Rules:** In the Firebase console, go to "Realtime Database" -> "Rules" and paste the following, replacing `"sneezy"` with your PC name and the corresponding `auth.uid` value (after setting up Firebase Authentication):
 
-### 2. Set Up the PostgreSQL Database
+    ```json
+    {
+      "rules": {
+        "PC_NAME": {
+          ".read": true,
+          ".write": "auth.uid === 'PC_NAME'", // Replace 'PC_NAME' with the actual UID
+          "$log_date": {
+            "flow_rate": { ".indexOn": ["timestamp"] },
+            "temperature": {
+              "CH1": { ".indexOn": ["timestamp"] },
+              "CH2": { ".indexOn": ["timestamp"] },
+              "CH3": { ".indexOn": ["timestamp"] },
+              "CH4": { ".indexOn": ["timestamp"] },
+              "CH5": { ".indexOn": ["timestamp"] },
+              "CH6": { ".indexOn": ["timestamp"] }
+            },
+            "resistance": {
+              "CH1": { ".indexOn": ["timestamp"] },
+              "CH2": { ".indexOn": ["timestamp"] },
+              "CH3": { ".indexOn": ["timestamp"] },
+              "CH4": { ".indexOn": ["timestamp"] },
+              "CH5": { ".indexOn": ["timestamp"] },
+              "CH6": { ".indexOn": ["timestamp"] }
+            },
+            "pressure": {
+              "CH1": { ".indexOn": ["timestamp"] },
+              "CH2": { ".indexOn": ["timestamp"] },
+              "CH3": { ".indexOn": ["timestamp"] },
+              "CH4": { ".indexOn": ["timestamp"] },
+              "CH5": { ".indexOn": ["timestamp"] },
+              "CH6": { ".indexOn": ["timestamp"] }
+            }
+          }
+        }
+      }
+    }
+    ```
 
-1. Start PostgreSQL:
-   ```bash
-   service postgresql start
-   ```
-2. Log in as the `postgres` user:
+    **Repeat this structure for each PC**, changing `"PC_NAME"` and the corresponding `auth.uid` in the `.write` rule.
 
-   ```bash
-   psql -U postgres
-   ```
+### 3. Installation
 
-3. Create a new database:
+1.  **Clone the repository:**
 
-   ```sql
-   CREATE DATABASE bashful_data;
-   ```
+    ```bash
+    git clone <repository_url>
+    cd <repository_name>
+    ```
 
-4. Create a user and grant privileges:
+2.  **Create and activate a virtual environment:**
 
-   ```sql
-   CREATE USER bluefors_user WITH PASSWORD 'your_password';
-   GRANT ALL PRIVILEGES ON DATABASE bashful_data TO bluefors_user;
-   ```
+    ```bash
+    conda create -n fridge_env python=3.9 -y
+    conda activate fridge_env
+    ```
 
-5. Exit the `psql` shell:
-   ```bash
-   \q
-   ```
+3.  **Install dependencies:**
 
----
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-### 3. Configure the `.env` File
+    (`requirements.txt` should contain: `firebase-admin`, `pandas`, `python-dotenv`)
 
-Create a `.env` file in the project root with the following structure:
+### 4. Configuration
 
-```ini
-DB_NAME=bashful_data
-DB_USER=bluefors_user
-DB_USER_PW=your_password
-DB_IP=127.0.0.1
-DB_PORT=5432
-```
+1.  Create a `.env` file in the project's root directory:
 
-Replace `your_password` with the actual database password.
+    ```
+    DB_URL='https://<YOUR_DATABASE_URL>.firebaseio.com/'
+    PC_NAME='pc_name'
+    ```
 
----
+    Replace placeholders with your actual values.
 
-### 4. Folder Structure
+2.  Ensure your log files are in a `logs` subdirectory, organized by date (e.g., `logs/22-07-20/CH1 T 22-07-20.log`).
 
-Ensure log files are organized by date in a `logs` directory:
+### 5. Usage
 
-```
-logs/
-├── 22-07-20/
-│   ├── CH1 T 22-07-20.log
-│   ├── CH1 P 22-07-20.log
-│   ├── Flowmeter 22-07-20.log
-│   ├── Channels 22-07-20.log
-│   └── ...
-├── 22-07-21/
-│   ├── ...
-```
-
----
-
-## Programs
-
-### 1. **Log to Database**
-
-**File**: `log_to_db.py`  
-**Purpose**: Processes historical log files and inserts them into the database.
-
-**Usage**:
+Run the real-time monitor:
 
 ```bash
 python log_to_db.py
 ```
 
-**Description**:
-
-- Scans all log directories (by date) in the `logs/` folder.
-- Processes `temperature`, `pressure`, `resistance`, `status`, and `flowmeter` logs.
-- Ensures tables exist in the database before inserting data.
-
----
-
-### 2. **Real-Time Monitor**
-
-**File**: `log_monitor.py`  
-**Purpose**: Continuously monitors logs for the current day and updates the database every minute.
-
-**Usage**:
+To run in the background:
 
 ```bash
-python log_monitor.py
+nohup python log_to_db.py &
 ```
 
-**Description**:
+**Important:** Set the `PC_NAME` environment variable correctly on each machine running the script.
 
-- Monitors logs of the current day in the `logs/` folder.
-- Automatically detects when the day changes and starts monitoring the new day's logs.
-- Ensures no duplicate data is added to the database.
-- Designed to run indefinitely, suitable for deployment on the logging machine.
+## Log File Format
 
-**To Run as Background Process**:
+Log files must be in the `logs` directory and follow these naming conventions:
 
-```bash
-nohup python log_monitor.py &
-```
+- Temperature: `CHX T YY-MM-DD.log`
+- Pressure: `CHX P YY-MM-DD.log`
+- Resistance: `CHX R YY-MM-DD.log`
+- Status: `Channels YY-MM-DD.log`
+- Flow Rate: `Flowmeter YY-MM-DD.log`
 
----
+## Security
 
-## Notes
-
-- The database uses `ON CONFLICT DO NOTHING` to avoid duplicate entries.
-- Log files must follow the naming convention:
-  - `CHX T YY-MM-DD.log` for temperature
-  - `CHX P YY-MM-DD.log` for pressure
-  - `CHX R YY-MM-DD.log` for resistance
-  - `Channels YY-MM-DD.log` for status
-  - `Flowmeter YY-MM-DD.log` for flow rates
-- Ensure log files are accessible and in the correct format for successful processing.
-
-For questions or troubleshooting, please refer to the code comments or reach out to the project maintainer.
-
----
-
-**Generated by GPT-4o**
+**Implement Firebase Authentication:** The provided rules are placeholders. You _must_ implement Firebase Authentication to secure your database and restrict write access to authorized users/devices. Refer to the Firebase documentation for details.
