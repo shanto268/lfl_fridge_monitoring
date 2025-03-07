@@ -1,4 +1,6 @@
+import datetime
 import os
+import time
 
 import firebase_admin
 import numpy as np
@@ -13,7 +15,7 @@ load_dotenv()
 CREDENTIALS_FILE = os.getenv('CRED_FILE')
 DATABASE_URL = os.getenv('DB_URL')
 PC_NAME = os.getenv('PC_NAME')
-LOGS_PARENT_DIRECTORY = "logs"  # Or a specific parent directory
+LOGS_PARENT_DIRECTORY = os.getenv('LOGFILE_DIR', 'logs')  # Default value
 FRIDGE_TYPE = os.getenv("FRIDGE_TYPE", "BlueFors")
 
 # --- Firebase Setup ---
@@ -35,8 +37,7 @@ def upload_data_bluefors(data, log_date, ref):
         if log_type == 'flow_rate':
             timestamp_str = channels['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
             value = channels['value']
-            # Directly set the data, don't use push for single values
-            ref.child('flow_rate').child(timestamp_str.replace(":", "_")).set({
+            ref.child('flow_rate').child(timestamp_str.replace(":", "_").replace(" ", "_")).set({
                 'timestamp': timestamp_str,
                 'value': float(value)
             })
@@ -44,42 +45,57 @@ def upload_data_bluefors(data, log_date, ref):
             for channel, channel_data in channels.items():
                 timestamp_str = channel_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
                 value = channel_data['value']
-                # Directly set the data, don't use push
-                ref.child(log_type).child(channel).child(timestamp_str.replace(":", "_")).set({
+                ref.child(log_type).child(channel).child(timestamp_str.replace(":", "_").replace(" ", "_")).set({
                     'timestamp': timestamp_str,
-                    'value': float(value)
+                    'value': float(value),
+                    'channel': channel  # Include channel here
                 })
 
-def upload_data_triton(data, log_file_name, ref):
-    """Uploads Triton data to a given Firebase reference, filtering zeros."""
-    timestamp_str = data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
-    data_to_upload = {'timestamp': timestamp_str}
+def upload_data_triton(data_df, log_file_name, ref):
+    """Uploads Triton data (entire DataFrame) to Firestore, filtering zeros."""
 
-    for key, value in data.items():
-        if key != 'timestamp':
-            if isinstance(value, (int, float, str, bool)):
-                if isinstance(value, (int, float)) and value == 0:
-                    continue
-                data_to_upload[key] = value
-            elif isinstance(value, np.number):
-                if float(value) == 0:
-                    continue
-                data_to_upload[key] = float(value)
-            else:
-                try:
-                    data_to_upload[key] = str(value)
-                except:
-                    print(f"Could not convert value for {key} to string. Skipping.")
+    # Iterate through DataFrame rows
+    for index, row in data_df.iterrows():
+        try:
+            # Correctly handle the 'Time(secs)' column and convert to datetime
+            timestamp_secs = row['Time(secs)']
+            if not isinstance(timestamp_secs, (int, float, np.number)):
+                print(f"Skipping row with invalid timestamp: {timestamp_secs}")
+                continue
 
-    if len(data_to_upload) > 1:
-        # Use set with timestamp as key, not push
-        ref.child(timestamp_str.replace(":", "_")).set(data_to_upload)
-    else:
-        print("No non-zero data to upload (besides timestamp).")
+            timestamp_datetime = datetime.datetime.fromtimestamp(timestamp_secs)
+            timestamp_str = timestamp_datetime.strftime('%Y-%m-%d %H:%M:%S')
+        except (ValueError, TypeError) as e:
+            print(f"Error converting timestamp for row {index}: {e}")
+            continue  # Skip to the next row if timestamp conversion fails
 
+        data_to_upload = {'timestamp': timestamp_str}
+
+        for col in data_df.columns:
+            if col != 'Time(secs)':  # Correctly check against 'Time(secs)'
+                value = row[col]
+                if isinstance(value, (int, float, str, bool)):
+                    # Filter out zero values (and non-numeric values)
+                    if isinstance(value, (int, float)) and value == 0:
+                        continue  # Skip zero values
+                    data_to_upload[col] = value
+                elif isinstance(value, np.number):
+                    #Filter out zero values
+                    if float(value) == 0:
+                        continue
+                    data_to_upload[col] = float(value)
+                else:
+                    try:
+                        data_to_upload[col] = str(value)
+                    except:
+                        print(f"Could not convert value for {col} to string. Skipping.")
+        if len(data_to_upload) > 1:  # if more than only timestamp
+            ref.child(timestamp_str.replace(":", "_").replace(" ", "_")).set(data_to_upload)
+        else:
+            print("No non-zero data to upload (besides timestamp).")
 
 def upload_all_data(parent_dir):
-    """Uploads all log entries from all dates in the parent directory."""
+    """Uploads all log entries from all dates/files in the parent directory."""
     fridge_type = get_fridge_type(PC_NAME)
 
     if fridge_type == "Oxford":
@@ -88,18 +104,17 @@ def upload_all_data(parent_dir):
             if log_file.endswith(".vcl"):
                 log_file_path = os.path.join(parent_dir, log_file)
                 print(f"Processing log file: {log_file}")
-                log_date = log_file.replace(" ", "_").replace(".", "_")  # Sanitize
+                log_date = log_file.replace(" ", "_").replace(".", "_").split('_')[1]
+                log_date = f"{log_date[:2]}-{log_date[2:4]}-{log_date[4:6]}"
                 ref = db.reference(f'/{PC_NAME}/{log_date}')
 
                 try:
                     reader = log_reader(log_file_path)
-                    data = reader.get_latest_entry()
-                    if data: # Check if any data.
-                        upload_data_triton(data, log_file, ref)
-
+                    data_df = reader.get_df()  # Get the ENTIRE DataFrame
+                    if not data_df.empty: # Check if not empty.
+                        upload_data_triton(data_df, log_file, ref) # Pass the dataframe.
                 except Exception as e:
                     print(f"Error processing {log_file}: {e}")
-
 
     else:  # Assume BlueFors
         log_reader = BlueForsLogReader(parent_dir)
@@ -124,21 +139,19 @@ def upload_all_data(parent_dir):
                         if channel_data.empty:
                             continue
 
-                        for _, row in channel_data.iterrows():  # Removed index
+                        for _, row in channel_data.iterrows():
                             timestamp_str = row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
                             value = row['value']
-                            # Directly SET the data, use timestamp as key
-                            ref.child(log_type).child(f"CH{channel}").child(timestamp_str.replace(":", "_")).set({
+                            ref.child(log_type).child(f"CH{channel}").child(timestamp_str.replace(":", "_").replace(" ", "_")).set({
                                 'timestamp': timestamp_str,
                                 'value': float(value),
-                                'channel': f"CH{channel}"  # Add channel here
+                                'channel': f"CH{channel}"
                             })
                 elif log_type == "flow_rate":
                     for _, row in df.iterrows():
                         timestamp_str = row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
                         value = row['flow_rate']
-                        # Directly set, using timestamp as key
-                        ref.child('flow_rate').child(timestamp_str.replace(":", "_")).set({
+                        ref.child('flow_rate').child(timestamp_str.replace(":", "_").replace(" ", "_")).set({
                             'timestamp': timestamp_str,
                             'value': float(value)
                         })
@@ -149,16 +162,22 @@ def upload_all_data(parent_dir):
                         for col in df.columns:
                             if col != 'timestamp':
                                 data_to_upload[col] = row[col]
-                        ref.child('status').child(timestamp_str.replace(":", "_")).set(data_to_upload) # Set the status
+                        ref.child('status').child(timestamp_str.replace(":", "_").replace(" ", "_")).set(data_to_upload)
 
 def upload_single_day_data(parent_dir, log_date):
-    """Uploads data for a single day."""
+    """Uploads data for a single day (or file, for Triton)."""
     fridge_type = get_fridge_type(PC_NAME)
-    ref = db.reference(f'/{PC_NAME}/{log_date}')  # Database reference for the specified date
+    # Sanitize the log_date for Firebase *before* creating the reference.
+    if fridge_type == "Oxford":
+      sanitized_log_date = log_date.replace(" ", "_").replace(".", "_").split('_')[1]
+      sanitized_log_date = f"{sanitized_log_date[:2]}-{sanitized_log_date[2:4]}-{sanitized_log_date[4:6]}"
+    else: #bluefors
+      sanitized_log_date = log_date
+    ref = db.reference(f'/{PC_NAME}/{sanitized_log_date}')
 
     if fridge_type == "Oxford":
         log_reader = TritonLogReader
-        log_file_path = os.path.join(parent_dir, log_date)  # Expect log_date to be filename
+        log_file_path = os.path.join(parent_dir, log_date)  # log_date is filename
         if not log_file_path.endswith(".vcl") or not os.path.isfile(log_file_path):
             print(f"Invalid file or file not found: {log_file_path}")
             return
@@ -167,18 +186,18 @@ def upload_single_day_data(parent_dir, log_date):
 
         try:
             reader = log_reader(log_file_path)
-            data = reader.get_latest_entry()
-            if data: # Check if any data
-                upload_data_triton(data, log_date, ref)
+            data_df = reader.get_df()  # Get the entire DataFrame
+            if not data_df.empty: #check if not empty
+                upload_data_triton(data_df, log_date, ref) # Pass whole dataframe
             else:
-                print("No data to upload")
+                print("No data to upload.")
 
         except Exception as e:
             print(f"Error processing {log_date}: {e}")
 
     else:  # Assume BlueFors
         log_reader = BlueForsLogReader(parent_dir)
-        log_date_path = os.path.join(parent_dir, log_date) # Check if dir
+        log_date_path = os.path.join(parent_dir, log_date)
         if not os.path.isdir(log_date_path):
             print(f"Invalid log date directory: {log_date_path}")
             return
@@ -201,19 +220,16 @@ def upload_single_day_data(parent_dir, log_date):
                     for _, row in channel_data.iterrows():
                         timestamp_str = row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
                         value = row['value']
-
-                        # Use .set() instead of .push(), with timestamp as key
-                        ref.child(log_type).child(f"CH{channel}").child(timestamp_str.replace(":", "_")).set({
+                        ref.child(log_type).child(f"CH{channel}").child(timestamp_str.replace(":", "_").replace(" ", "_")).set({
                             'timestamp': timestamp_str,
                             'value': float(value),
-                            'channel': f"CH{channel}" # Add channel here
+                            'channel': f"CH{channel}"
                         })
             elif log_type == "flow_rate":
                 for _, row in df.iterrows():
                     timestamp_str = row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
                     value = row['flow_rate']
-                    # Use set, with timestamp as key
-                    ref.child('flow_rate').child(timestamp_str.replace(":", "_")).set({
+                    ref.child('flow_rate').child(timestamp_str.replace(":", "_").replace(" ", "_")).set({
                         'timestamp': timestamp_str,
                         'value': float(value)
                     })
@@ -224,8 +240,7 @@ def upload_single_day_data(parent_dir, log_date):
                     for col in df.columns:
                         if col != 'timestamp':
                             data_to_upload[col] = row[col]
-                    #Use set.
-                    ref.child('status').child(timestamp_str.replace(":", "_")).set(data_to_upload) #set for status
+                    ref.child('status').child(timestamp_str.replace(":", "_").replace(" ", "_")).set(data_to_upload)
 
 def main():
     # Example Usage (choose one):
@@ -237,7 +252,7 @@ def main():
     #upload_single_day_data(LOGS_PARENT_DIRECTORY, "22-07-21")
 
     # 3. Upload data for a single day (Oxford):
-    upload_single_day_data(LOGS_PARENT_DIRECTORY, "log 230607 124809.vcl") #Pass filename for Oxford
+    upload_single_day_data(LOGS_PARENT_DIRECTORY, "log 240119 141920.vcl") #Pass filename for Oxford
     print("Data upload complete.")
 
 if __name__ == "__main__":

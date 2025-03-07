@@ -18,7 +18,7 @@ if not firebase_admin._apps:  # Prevents re-initialization
         'databaseURL': os.getenv('DB_URL')
     })
 
-PC_NAMES = ["sneezy", "dopey", "bashful", "test"]  # Centralize PC names
+PC_NAMES = ["sneezy", "dopey", "bashful"]  # Centralize PC names
 DEFAULT_FRIDGE_TYPE = "BlueFors"
 
 # --- Helper Functions ---
@@ -231,7 +231,7 @@ def main():
                 st.write(f"**{selected_key}:**")
                 fig = px.line(df, x='Timestamp', y=selected_key, title=f'{selected_key} over Time')
                 st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(df)  # Show as table
+                # st.dataframe(df)  # Show as table
             else:
                 st.write("Selected data not available in the fetched data.")
 
