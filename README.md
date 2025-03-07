@@ -23,12 +23,13 @@ This project monitors a BlueFors dilution refrigerator, logging data to a Fireba
     - Go to "Project settings" (gear icon) in the Firebase console.
     - Select the "Service accounts" tab.
     - Click "Generate new private key". This downloads a JSON file (e.g., `sneezy.json`). **Keep this file secure!** Place it in the project's root directory.
-5.  **Set Firebase Rules:** In the Firebase console, go to "Realtime Database" -> "Rules" and paste the following, replacing `"sneezy"` with your PC name and the corresponding `auth.uid` value (after setting up Firebase Authentication):
+5.  **Set Firebase Rules:** In the Firebase console, go to "Realtime Database" -> "Rules" and paste the following, replacing the key entries.
 
     ```json
     {
       "rules": {
-        "PC_NAME": {
+        "BlueFors_PC": {
+          // Setup for BlueFors System
           ".read": true,
           ".write": "auth.uid === 'PC_NAME'", // Replace 'PC_NAME' with the actual UID
           "$log_date": {
@@ -56,6 +57,17 @@ This project monitors a BlueFors dilution refrigerator, logging data to a Fireba
               "CH4": { ".indexOn": ["timestamp"] },
               "CH5": { ".indexOn": ["timestamp"] },
               "CH6": { ".indexOn": ["timestamp"] }
+            }
+          }
+        },
+        "OXFORD_PC": {
+          // Setup for Oxford Triton Systems
+          ".read": true,
+          ".write": "auth.uid === 'PC_NAME'",
+          "$log_date": {
+            ".indexOn": ["timestamp"],
+            "$data": {
+              ".write": "newData.parent().child('timestamp').exists() && newData.val() != 0"
             }
           }
         }
@@ -96,6 +108,9 @@ This project monitors a BlueFors dilution refrigerator, logging data to a Fireba
     ```
     DB_URL='https://<YOUR_DATABASE_URL>.firebaseio.com/'
     PC_NAME='pc_name'
+    CRED_FILE="credfilename.json"
+    FRIDGE_TYPE="yourfridgetype" # Oxford or Bluefors
+    LOGFILE_DIR="path/to/your/log/files"
     ```
 
     Replace placeholders with your actual values.
@@ -120,13 +135,19 @@ nohup python log_to_db.py &
 
 ## Log File Format
 
-Log files must be in the `logs` directory and follow these naming conventions:
+### BlueFors System:
+
+Log files must be in the `logs` directory and follow these naming conventions (this is by default what it should be):
 
 - Temperature: `CHX T YY-MM-DD.log`
 - Pressure: `CHX P YY-MM-DD.log`
 - Resistance: `CHX R YY-MM-DD.log`
 - Status: `Channels YY-MM-DD.log`
 - Flow Rate: `Flowmeter YY-MM-DD.log`
+
+### Oxford System:
+
+Point to the path with the `.vcl` files.
 
 ## Security
 
