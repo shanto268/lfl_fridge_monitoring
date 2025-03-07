@@ -1,6 +1,6 @@
-# BlueFors Data Logger and Monitor
+# LFL Fridge Data Feeding System
 
-This project monitors a BlueFors dilution refrigerator, logging data to a Firebase Realtime Database.
+This repository contains the code needed to push dilution fridge system data for both BlueFors and Oxford Systems to a Firebase Realtime Database
 
 ## Features
 
