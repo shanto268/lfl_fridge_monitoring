@@ -80,18 +80,21 @@ def main(LOGS_FOLDER="logs"):
     latest_log_file = None  # Track the latest log file
 
     while True:
-        # Update present time
         present_time = time.localtime()  # Get current time
         current_date = time.strftime("%Y-%m-%d", present_time)
 
         # Check if the date has changed
-        if latest_log_file is None or current_date != time.strftime("%Y-%m-%d", start_time):
-            # Date has changed, find the latest log file
+        if current_date != time.strftime("%Y-%m-%d", start_time):
+            latest_log_file = None  # Reset log file tracking
+            start_time = present_time  # Update start time to the new day
+
+        # Find the latest log file if needed
+        if latest_log_file is None:
             if get_fridge_type(PC_NAME) == "Oxford":
                 log_files = [f for f in os.listdir(LOGS_FOLDER) if f.endswith('.vcl')]
                 log_files.sort(reverse=True)  # Most recent first
                 if log_files:
-                    latest_log_file = log_files[0]  # Update to the latest log file
+                    latest_log_file = log_files[0]
                     print(f"New log file detected: {latest_log_file}")
                 else:
                     print("No .vcl log files found.")
@@ -101,15 +104,12 @@ def main(LOGS_FOLDER="logs"):
                 log_dates = [d for d in os.listdir(LOGS_FOLDER) if os.path.isdir(os.path.join(LOGS_FOLDER, d))]
                 log_dates.sort(reverse=True)  # Most recent first
                 if log_dates:
-                    latest_log_file = log_dates[0]  # Update to the latest log date
+                    latest_log_file = log_dates[0]
                     print(f"New log date detected: {latest_log_file}")
                 else:
                     print("No log directories found.")
                     time.sleep(60)
                     continue
-
-            # Update start_time to the current time
-            start_time = present_time
 
         # Process the latest log file
         if get_fridge_type(PC_NAME) == "Oxford":
@@ -118,13 +118,11 @@ def main(LOGS_FOLDER="logs"):
                 log_reader = TritonLogReader(log_file_path)
                 latest_data = log_reader.get_latest_entry()
                 if latest_data:
-                    upload_data_triton(latest_data, latest_log_file)  # Pass the log file name
+                    upload_data_triton(latest_data, latest_log_file)
                 else:
                     print("No data found in the latest log file.")
-
             except Exception as e:
                 print(f"Error processing {latest_log_file}: {e}")
-
         else:  # Assume BlueFors
             try:
                 log_reader = BlueForsLogReader(LOGS_FOLDER)
@@ -133,7 +131,6 @@ def main(LOGS_FOLDER="logs"):
                     upload_data_bluefors(latest_data, latest_log_file)
                 else:
                     print(f"No data found for {latest_log_file}")
-
             except Exception as e:
                 print(f"Error processing {latest_log_file}: {e}")
 
