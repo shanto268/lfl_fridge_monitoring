@@ -76,75 +76,68 @@ def upload_data_triton(data, log_file_name):
 def main(LOGS_FOLDER="logs"):
     """Main loop to continuously monitor logs and upload data."""
     processed_dates = set()
+    start_time = time.localtime()  # Record the start time
+    latest_log_file = None  # Track the latest log file
 
     while True:
-        # Determine fridge type *here*, based on PC_NAME, not a global.
-        fridge_type = get_fridge_type(PC_NAME)
+        # Update present time
+        present_time = time.localtime()  # Get current time
+        current_date = time.strftime("%Y-%m-%d", present_time)
 
-        # Get the most recent log directory for BlueFors, or file for Triton
-        if fridge_type == "Oxford":
-            log_files = [f for f in os.listdir(LOGS_FOLDER) if f.endswith('.vcl')]
-            log_files.sort(reverse=True)
-            if not log_files:
-                print("No .vcl log files found.")
-                time.sleep(60)
-                continue
-            latest_log_file = log_files[0]
-            latest_log_date = latest_log_file
+        # Check if the date has changed
+        if latest_log_file is None or current_date != time.strftime("%Y-%m-%d", start_time):
+            # Date has changed, find the latest log file
+            if get_fridge_type(PC_NAME) == "Oxford":
+                log_files = [f for f in os.listdir(LOGS_FOLDER) if f.endswith('.vcl')]
+                log_files.sort(reverse=True)  # Most recent first
+                if log_files:
+                    latest_log_file = log_files[0]  # Update to the latest log file
+                    print(f"New log file detected: {latest_log_file}")
+                else:
+                    print("No .vcl log files found.")
+                    time.sleep(60)
+                    continue
+            else:  # Assume BlueFors
+                log_dates = [d for d in os.listdir(LOGS_FOLDER) if os.path.isdir(os.path.join(LOGS_FOLDER, d))]
+                log_dates.sort(reverse=True)  # Most recent first
+                if log_dates:
+                    latest_log_file = log_dates[0]  # Update to the latest log date
+                    print(f"New log date detected: {latest_log_file}")
+                else:
+                    print("No log directories found.")
+                    time.sleep(60)
+                    continue
+
+            # Update start_time to the current time
+            start_time = present_time
+
+        # Process the latest log file
+        if get_fridge_type(PC_NAME) == "Oxford":
             log_file_path = os.path.join(LOGS_FOLDER, latest_log_file)
+            try:
+                log_reader = TritonLogReader(log_file_path)
+                latest_data = log_reader.get_latest_entry()
+                if latest_data:
+                    upload_data_triton(latest_data, latest_log_file)  # Pass the log file name
+                else:
+                    print("No data found in the latest log file.")
+
+            except Exception as e:
+                print(f"Error processing {latest_log_file}: {e}")
 
         else:  # Assume BlueFors
-            log_dates = [d for d in os.listdir(LOGS_FOLDER) if os.path.isdir(os.path.join(LOGS_FOLDER, d))]
-            log_dates.sort(reverse=True)
-            if not log_dates:
-                print("No log directories found.")
-                time.sleep(60)
-                continue
-            latest_log_date = log_dates[0]
-
-        if latest_log_date not in processed_dates:
-            print(f"Processing new log date/file: {latest_log_date}")
             try:
-                if fridge_type == "Oxford":
-                    log_reader = TritonLogReader(log_file_path)
-                    latest_data = log_reader.get_latest_entry()
-                    if latest_data:
-                        upload_data_triton(latest_data, latest_log_date)
-                    else:
-                        print("no data latest found")
-
-                else:  # BlueFors
-                    log_reader = BlueForsLogReader(LOGS_FOLDER)
-                    latest_data = log_reader.get_latest_entry(latest_log_date)
-                    if latest_data:
-                        upload_data_bluefors(latest_data, latest_log_date)
-                    else:
-                        print(f"No data found for {latest_log_date}")
-                processed_dates.add(latest_log_date)
+                log_reader = BlueForsLogReader(LOGS_FOLDER)
+                latest_data = log_reader.get_latest_entry(latest_log_file)
+                if latest_data:
+                    upload_data_bluefors(latest_data, latest_log_file)
+                else:
+                    print(f"No data found for {latest_log_file}")
 
             except Exception as e:
-                print(f"Error processing {latest_log_date}: {e}")
+                print(f"Error processing {latest_log_file}: {e}")
 
-        else:
-            print(f"Already processed {latest_log_date}, checking for updates...")
-            try:
-                if fridge_type == "Oxford":
-                    log_reader = TritonLogReader(log_file_path)
-                    latest_data = log_reader.get_latest_entry()
-                    if latest_data:
-                        upload_data_triton(latest_data, latest_log_date)
-
-                else:  # BlueFors
-                    log_reader = BlueForsLogReader(LOGS_FOLDER)
-                    latest_data = log_reader.get_latest_entry(latest_log_date)
-                    if latest_data:
-                        upload_data_bluefors(latest_data, latest_log_date)
-                    else:
-                        print(f"No new data in {latest_log_date}")
-
-            except Exception as e:
-                print(f"Error processing {latest_log_date} during update check: {e}")
-        time.sleep(60)
+        time.sleep(60)  # Check for new logs every 60 seconds
 
 if __name__ == "__main__":
     load_dotenv()
