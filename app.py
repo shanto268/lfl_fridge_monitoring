@@ -36,9 +36,11 @@ firebase_creds = {
     os.getenv("FIREBASE_CLIENT_X509_CERT_URL"),
 }
 
-if not firebase_admin._apps:  # Prevents re-initialization
-    cred = credentials.Certificate(os.getenv('CRED_FILE'))
-    firebase_admin.initialize_app(cred, {'databaseURL': os.getenv('DB_URL')})
+if not firebase_admin._apps:
+    cred = credentials.Certificate(firebase_creds)
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': os.getenv('DB_URL')
+    })
 
 PC_NAMES = ["sneezy", "dopey", "bashful"]  # Centralize PC names
 DEFAULT_FRIDGE_TYPE = "BlueFors"
