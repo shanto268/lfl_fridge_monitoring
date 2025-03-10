@@ -158,8 +158,6 @@ This update ensures better security and seamless integration with Streamlit. Let
 python log_to_db.py
 ```
 
-````
-
 **To Run as Background Process:**
 
 ```bash
@@ -231,4 +229,3 @@ streamlit run app.py
       ".read": "auth != null",
       ".write": "auth.uid === 'your_admin_uid'" // Or a more complex rule
     ```
-````
