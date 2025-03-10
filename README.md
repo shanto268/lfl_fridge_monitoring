@@ -108,6 +108,44 @@ This repository contains code to push dilution fridge system data (both BlueFors
     - **BlueFors:** Organized by date (e.g., `logs/22-07-20/CH1 T 22-07-20.log`).
     - **Oxford/Triton:** `.vcl` files directly in the `logs` directory (e.g., `logs/log 240119 141920.vcl`).
 
+**For Webapp Deployment:**
+
+1. **Store Firebase Credentials Securely**  
+   Streamlit uses `secrets.toml` for storing private keys. Create a `secrets.toml` file in the `.streamlit/` directory:
+
+   ```
+   .streamlit/secrets.toml
+   ```
+
+   **Example:**
+   ```toml
+   [firebase]
+   FIREBASE_TYPE = "service_account"
+   FIREBASE_PROJECT_ID = "your-project-id"
+   FIREBASE_PRIVATE_KEY_ID = "your-private-key-id"
+   FIREBASE_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nABC123...\n-----END PRIVATE KEY-----"
+   FIREBASE_CLIENT_EMAIL = "your-client-email@your-project.iam.gserviceaccount.com"
+   FIREBASE_CLIENT_ID = "your-client-id"
+   FIREBASE_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+   FIREBASE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+   FIREBASE_AUTH_PROVIDER_X509_CERT_URL = "https://www.googleapis.com/oauth2/v1/certs"
+   FIREBASE_CLIENT_X509_CERT_URL = "https://www.googleapis.com/robot/v1/metadata/x509/your-client-email@your-project.iam.gserviceaccount.com"
+   DB_URL = "https://your-database.firebaseio.com/"
+   ```
+
+   **Ensure:**  
+   - The **private key** is formatted correctly, preserving `\n` for line breaks.
+   - The `.streamlit/secrets.toml` file is **never committed** to Git. Add it to `.gitignore`:
+     ```
+     .streamlit/secrets.toml
+     ```
+
+This replaces `.env` files and ensures **secure storage** for Firebase credentials.
+
+---
+
+This update ensures better security and seamless integration with Streamlit. Let me know if you need further refinements! 🚀
+
 ## Programs
 
 ### 1. Real-Time Monitor (`log_to_db.py`)

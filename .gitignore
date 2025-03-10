@@ -7,3 +7,5 @@ log_archives
 test_logs
 to_do.md
 .DS_Store
+secrets.toml
+.streamlit

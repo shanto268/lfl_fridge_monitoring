@@ -1,6 +1,4 @@
 import datetime
-import os
-
 import firebase_admin
 import numpy as np
 import pandas as pd
@@ -9,45 +7,28 @@ import streamlit as st
 from dotenv import load_dotenv
 from firebase_admin import credentials, db
 
-# --- Load Environment Variables and Initialize Firebase ---
-load_dotenv()
-
-# Construct Firebase credentials from env variables
+# Load Firebase credentials from Streamlit secrets
 firebase_creds = {
-    "type":
-    os.getenv("FIREBASE_TYPE"),
-    "project_id":
-    os.getenv("FIREBASE_PROJECT_ID"),
-    "private_key_id":
-    os.getenv("FIREBASE_PRIVATE_KEY_ID"),
-    "private_key":
-    os.getenv("FIREBASE_PRIVATE_KEY").replace('\\n', '\n'),  # Fix line breaks
-    "client_email":
-    os.getenv("FIREBASE_CLIENT_EMAIL"),
-    "client_id":
-    os.getenv("FIREBASE_CLIENT_ID"),
-    "auth_uri":
-    os.getenv("FIREBASE_AUTH_URI"),
-    "token_uri":
-    os.getenv("FIREBASE_TOKEN_URI"),
-    "auth_provider_x509_cert_url":
-    os.getenv("FIREBASE_AUTH_PROVIDER_X509_CERT_URL"),
-    "client_x509_cert_url":
-    os.getenv("FIREBASE_CLIENT_X509_CERT_URL"),
+    "type": st.secrets["firebase"]["FIREBASE_TYPE"],
+    "project_id": st.secrets["firebase"]["FIREBASE_PROJECT_ID"],
+    "private_key_id": st.secrets["firebase"]["FIREBASE_PRIVATE_KEY_ID"],
+    "private_key": st.secrets["firebase"]["FIREBASE_PRIVATE_KEY"].replace('\\n', '\n'),
+    "client_email": st.secrets["firebase"]["FIREBASE_CLIENT_EMAIL"],
+    "client_id": st.secrets["firebase"]["FIREBASE_CLIENT_ID"],
+    "auth_uri": st.secrets["firebase"]["FIREBASE_AUTH_URI"],
+    "token_uri": st.secrets["firebase"]["FIREBASE_TOKEN_URI"],
+    "auth_provider_x509_cert_url": st.secrets["firebase"]["FIREBASE_AUTH_PROVIDER_X509_CERT_URL"],
+    "client_x509_cert_url": st.secrets["firebase"]["FIREBASE_CLIENT_X509_CERT_URL"],
 }
 
 if not firebase_admin._apps:
     cred = credentials.Certificate(firebase_creds)
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': os.getenv('DB_URL')
-    })
+    firebase_admin.initialize_app(cred, {'databaseURL': st.secrets["firebase"]["DB_URL"]})
 
 PC_NAMES = ["sneezy", "dopey", "bashful"]  # Centralize PC names
 DEFAULT_FRIDGE_TYPE = "BlueFors"
 
 # --- Helper Functions ---
-
-
 def get_fridge_type(pc_name: str) -> str:
     """Gets the fridge type for a given PC name."""
     if pc_name == "dopey":
